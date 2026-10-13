@@ -6,6 +6,7 @@
 // 결과:
 //   <글 폴더>/cards/NN_id.png  (1080px, 네이버 업로드용)
 //   <글 폴더>/발행본.md        (카드 이미지가 들어간 완성 원고)
+//   <글 폴더>/미리보기.html    (블로그에 올렸을 때 모습)
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,6 +17,7 @@ import { createRequire } from 'node:module';
 const { chromium } = createRequire(import.meta.url)('playwright');
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const { buildPreview } = await import('./preview.mjs');
 const postDir = path.resolve(process.argv[2] || '');
 if (!process.argv[2] || !fs.existsSync(path.join(postDir, 'cards.json'))) {
   console.error('사용법: node tools/card_maker/make_cards.mjs <cards.json이 있는 글 폴더>');
@@ -243,4 +245,6 @@ if (fs.existsSync(draft)) {
   console.log(`\n발행본.md 생성 — 카드 ${Object.keys(files).length}장`);
   if (missing.length) console.log(`⚠️ 원고에는 있는데 cards.json에 없는 카드: ${missing.join(', ')}`);
   if (unused.length) console.log(`ℹ️ 원고에 자리가 없는 카드: ${unused.join(', ')}`);
+  const r = buildPreview(postDir);
+  console.log(`미리보기.html 생성 — 현장 사진 ${r.photos}장 · 직접 작성 ${r.todos}곳 남음`);
 }
