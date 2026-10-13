@@ -1,0 +1,18 @@
+{
+  "name": "복부동산 중개법인",
+  "series": "분당 상권 리포트",
+  "contact": "문의 031-000-0000 · 010-0000-0000",
+  "colors": {
+    "accent": "#2a78d6",
+    "accentSoft": "#e3eefb",
+    "down": "#e34948",
+    "downSoft": "#fdeaea",
+    "neutral": "#9aa0a8",
+    "bg": "#f6f7f9",
+    "surface": "#ffffff",
+    "ink": "#14171c",
+    "ink2": "#4a505a",
+    "ink3": "#7a808a",
+    "line": "#dfe2e7"
+  }
+}
