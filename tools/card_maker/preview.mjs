@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -14,6 +15,19 @@ function inline(s) {
     .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/【(.+?)】/g, '<mark class="todo">✍️ 직접 작성: $1</mark>');
+}
+
+// 이미지 공개 주소: brand.json의 imageBaseUrl, 없으면 GitHub 공개 저장소 raw 주소를 자동 계산
+function remoteBase(postDir, brand) {
+  if (brand.imageBaseUrl) return brand.imageBaseUrl.replace(/\/$/, '');
+  try {
+    const git = c => execSync(c, { cwd: postDir, encoding: 'utf8' }).trim();
+    const m = git('git remote get-url origin').match(/github\.com[/:]([^/]+)\/(.+?)(\.git)?$/);
+    const root = git('git rev-parse --show-toplevel'), branch = git('git rev-parse --abbrev-ref HEAD');
+    if (!m) return null;
+    const rel = path.relative(root, postDir).split(path.sep).map(encodeURIComponent).join('/');
+    return `https://raw.githubusercontent.com/${m[1]}/${m[2]}/refs/heads/${branch}/${rel}`;
+  } catch { return null; }
 }
 
 function section(md, name) {
@@ -32,7 +46,9 @@ export function buildPreview(postDir) {
   const tags = (section(md, '태그').match(/#[^\s#]+/g) || []);
   const lines = section(md, '본문').split('\n');
 
-  let html = '', i = 0, photos = 0, todos = 0, cards = 0;
+  const base = remoteBase(postDir, brand);
+  let html = '', cp = '', i = 0, photos = 0, todos = 0, cards = 0;
+  const plain = t => inline(t).replace(/<mark class="todo">(.*?)<\/mark>/g, '<b style="background:#fff3c4">[$1]</b>');
   const img = src => {
     const p = path.join(postDir, src);
     return fs.existsSync(p) ? `data:image/png;base64,${fs.readFileSync(p).toString('base64')}` : '';
@@ -43,22 +59,32 @@ export function buildPreview(postDir) {
     if (/^```/.test(L)) {                         // 코드 블록 → 안내 박스
       const buf = []; i++;
       while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
-      i++; html += `<div class="note">${buf.map(inline).join('<br>')}</div>`; continue;
+      i++; html += `<div class="note">${buf.map(inline).join('<br>')}</div>`;
+      cp += `<p style="background:#eef5fd;padding:12px">${buf.map(plain).join('<br>')}</p>`; continue;
     }
-    if (/^---+$/.test(L.trim())) { html += '<div class="divider" aria-hidden="true"><i></i><i></i><i></i></div>'; i++; continue; }
-    if (/^### /.test(L)) { html += `<h3>${inline(L.slice(4))}</h3>`; i++; continue; }
+    if (/^---+$/.test(L.trim())) { html += '<div class="divider" aria-hidden="true"><i></i><i></i><i></i></div>'; cp += '<hr>'; i++; continue; }
+    if (/^### /.test(L)) { html += `<h3>${inline(L.slice(4))}</h3>`; cp += `<h3><b>${plain(L.slice(4))}</b></h3>`; i++; continue; }
     const im = L.match(/^!\[(.*?)\]\((.+?)\)/);
-    if (im) { cards++; html += `<figure><img src="${img(im[2])}" alt="${esc(im[1])}" loading="lazy"></figure>`; i++; continue; }
-    if (/^📷/.test(L.trim())) { photos++; html += `<div class="photo"><span>📷 현장 사진 자리</span>${inline(L.replace(/^📷\s*/, ''))}</div>`; i++; continue; }
+    if (im) {
+      cards++; html += `<figure><img src="${img(im[2])}" alt="${esc(im[1])}" loading="lazy"></figure>`;
+      cp += base ? `<p><img src="${base}/${im[2].split('/').map(encodeURIComponent).join('/')}" alt="${esc(im[1])}"></p>` : `<p>[카드 이미지: ${esc(im[2])}]</p>`;
+      i++; continue;
+    }
+    if (/^📷/.test(L.trim())) {
+      photos++; html += `<div class="photo"><span>📷 현장 사진 자리</span>${inline(L.replace(/^📷\s*/, ''))}</div>`;
+      cp += `<p><b style="background:#fff3c4">[📷 현장 사진 넣을 자리: ${plain(L.replace(/^📷\s*/, ''))}]</b></p>`; i++; continue;
+    }
     if (/^\(공통 서명\)/.test(L.trim())) {
-      html += `<div class="sign"><b>${esc(brand.name)}</b><span>${esc(brand.contact)}</span><span>중개사무소 등록번호 · 주소는 공통 서명에서 자동으로 붙습니다</span></div>`; i++; continue;
+      html += `<div class="sign"><b>${esc(brand.name)}</b><span>${esc(brand.contact)}</span><span>중개사무소 등록번호 · 주소는 공통 서명에서 자동으로 붙습니다</span></div>`;
+      cp += `<p><b>${esc(brand.name)}</b><br>${esc(brand.contact)}</p>`; i++; continue;
     }
     if (/^>/.test(L)) {                            // 인용 박스
       const buf = [];
       while (i < lines.length && /^>/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/, ''));
       const inner = buf.map(b => /^- /.test(b) ? `<li>${inline(b.slice(2))}</li>` : b.trim() ? `<p>${inline(b)}</p>` : '').join('')
         .replace(/(<li>.*?<\/li>)+/g, m => `<ul>${m}</ul>`);
-      html += `<blockquote>${inner}</blockquote>`; continue;
+      html += `<blockquote>${inner}</blockquote>`;
+      cp += `<blockquote>${buf.filter(b => b.trim()).map(b => (/^- /.test(b) ? '· ' + plain(b.slice(2)) : plain(b))).join('<br>')}</blockquote>`; continue;
     }
     if (/^\|/.test(L)) {                           // 표
       const rows = [];
@@ -67,16 +93,18 @@ export function buildPreview(postDir) {
       const head = cells(rows[0]), body = rows.slice(2).map(cells);
       const num = c => /^[+−-]?[\d,.]+/.test(c) || /^\*\*[+−-]/.test(c);
       html += `<div class="tablewrap"><table><thead><tr>${head.map(h => `<th>${inline(h)}</th>`).join('')}</tr></thead><tbody>${body.map(r => `<tr>${r.map(c => `<td class="${num(c) ? 'n' : ''}">${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+      cp += `<table border="1" style="border-collapse:collapse"><tr>${head.map(h => `<td style="background:#f7f8fa;padding:6px"><b>${plain(h)}</b></td>`).join('')}</tr>${body.map(r => `<tr>${r.map(c => `<td style="padding:6px;text-align:${num(c) ? 'right' : 'left'}">${plain(c)}</td>`).join('')}</tr>`).join('')}</table><p><br></p>`;
       continue;
     }
     if (/^- /.test(L)) {
       const buf = [];
       while (i < lines.length && /^- /.test(lines[i])) buf.push(lines[i++].slice(2));
-      html += `<ul>${buf.map(b => `<li>${inline(b)}</li>`).join('')}</ul>`; continue;
+      html += `<ul>${buf.map(b => `<li>${inline(b)}</li>`).join('')}</ul>`;
+      cp += `<p>${buf.map(b => '· ' + plain(b)).join('<br>')}</p>`; continue;
     }
     const buf = [];
     while (i < lines.length && lines[i].trim() && !/^(#|>|\||- |```|---|!\[|📷)/.test(lines[i])) buf.push(lines[i++]);
-    if (buf.length) html += `<p>${buf.map(inline).join('<br>')}</p>`;
+    if (buf.length) { html += `<p>${buf.map(inline).join('<br>')}</p>`; cp += `<p>${buf.map(plain).join('<br>')}</p>`; }
     else i++;
   }
   todos = (html.match(/class="todo"/g) || []).length;
@@ -127,15 +155,81 @@ code{font-family:var(--ui);background:#f0f1f3;padding:1px 5px;border-radius:3px;
 .sign b{color:var(--ink);font-size:15px}
 .tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px}
 .tags span{font-family:var(--ui);font-size:13px;color:var(--ink2);background:#f2f3f5;border-radius:999px;padding:5px 12px}
+.tools{background:var(--paper);border:1px solid var(--rule);border-radius:4px;padding:18px 20px;margin-bottom:16px;font-family:var(--ui);display:flex;flex-direction:column;gap:12px}
+.tools h2{font-size:15px;margin:0}
+.tools ol{margin:0;padding-left:20px;font-size:14px;line-height:1.8;color:var(--ink2)}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+.btns button{font:inherit;font-size:14px;font-weight:700;border:1px solid var(--rule);background:var(--paper);color:var(--ink);border-radius:6px;padding:10px 14px;cursor:pointer}
+.btns button.main{background:var(--naver);border-color:var(--naver);color:#fff}
+.btns button:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+.msg{font-size:13px;color:var(--ink2);min-height:1.4em}
+.msg.ok{color:#0a8a3f;font-weight:700}
+#copyzone{position:fixed;left:-9999px;top:0;width:700px}
+#copyzone.manual{position:static;width:auto;max-width:720px;margin:0 auto 24px;background:var(--paper);border:3px solid var(--naver);padding:16px;font-size:15px;line-height:1.8}
+#copyzone.manual img{display:block;min-height:60px;background:#eef0f3}
 </style>
 <div class="status" role="status"><span>미리보기 · 아직 발행 전</span><span>이미지 카드 <b>${cards}장</b> 자동 생성</span><span>현장 사진 <b>${photos}장</b> 필요</span><span>직접 작성 <b>${todos}곳</b></span></div>
-<div class="wrap"><article>
+<div class="wrap">
+<section class="tools" aria-labelledby="th">
+  <h2 id="th">네이버 블로그로 옮기기</h2>
+  <div class="btns">
+    <button type="button" class="main" id="b-body">본문 복사 (이미지 포함)</button>
+    <button type="button" id="b-title">제목 복사</button>
+    <button type="button" id="b-tags">태그 복사</button>
+  </div>
+  <div class="msg" id="msg" role="status"></div>
+  <ol>
+    <li>네이버 글쓰기 화면에서 <b>제목</b>칸에 제목을 붙여넣기</li>
+    <li><b>본문 복사</b>를 누르고 본문 첫 줄을 클릭한 뒤 붙여넣기 (Ctrl+V / ⌘+V). 카드 이미지 ${cards}장이 함께 들어갑니다</li>
+    <li>노란 표시(현장 사진 자리, 직접 작성)를 채우고 지우기 → 첫 카드를 대표 이미지로 지정</li>
+  </ol>
+</section>
+<article>
 <div class="cat">${esc(category)}</div>
 <h1>${inline(titleLine)}</h1>
 <div class="by"><div class="av" aria-hidden="true">${esc((brand.author || brand.name).slice(0, 1))}</div><div><b>${esc(brand.author || brand.name)}</b>${esc(brand.name)}</div></div>
 ${html}
 <div class="tags">${tags.map(t => `<span>${esc(t)}</span>`).join('')}</div>
-</article></div>`;
+</article></div>
+<div id="copyzone" aria-hidden="true"></div>
+<script>
+const COPY = ${JSON.stringify({ body: cp, title: titleLine.replace(/\*\*/g, ''), tags: tags.join(' ') }).replace(/</g, '\\u003c')};
+const msg = document.getElementById('msg');
+const say = (t, ok) => { msg.textContent = t; msg.className = 'msg' + (ok ? ' ok' : ''); };
+async function copyHtml(html) {
+  const text = html.replace(/<br>/g, '\\n').replace(/<\\/p>/g, '\\n\\n').replace(/<[^>]+>/g, '');
+  try {
+    await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }) })]);
+    return true;
+  } catch (e) {
+    const z = document.getElementById('copyzone'); z.innerHTML = html;
+    const r = document.createRange(); r.selectNodeContents(z);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    let ok = false; try { ok = document.execCommand('copy'); } catch (_) {}
+    sel.removeAllRanges(); z.innerHTML = '';
+    return ok;
+  }
+}
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch (e) { return false; }
+}
+document.getElementById('b-body').addEventListener('click', async () => {
+  if (await copyHtml(COPY.body)) return say('본문을 복사했습니다. 네이버 본문에 붙여넣으세요.', true);
+  // 복사가 막힌 화면: 붙여넣기용 영역을 보여주고 직접 선택하게 함
+  const z = document.getElementById('copyzone');
+  z.innerHTML = COPY.body; z.className = 'manual'; z.setAttribute('aria-hidden', 'false');
+  const r = document.createRange(); r.selectNodeContents(z);
+  const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+  z.scrollIntoView({ block: 'start' });
+  say('이 화면에서는 자동 복사가 막혀 있습니다. 아래 테두리 영역이 선택되었으니 Ctrl+C(⌘+C)를 눌러 복사하세요. 이 영역에서는 이미지가 안 보여도 붙여넣으면 들어갑니다.');
+});
+document.getElementById('b-title').addEventListener('click', async () => {
+  say(await copyText(COPY.title) ? '제목을 복사했습니다.' : '복사가 막혀 있습니다. 제목: ' + COPY.title, true);
+});
+document.getElementById('b-tags').addEventListener('click', async () => {
+  say(await copyText(COPY.tags) ? '태그를 복사했습니다. 태그 칸에 붙여넣으세요.' : '복사가 막혀 있습니다. 태그: ' + COPY.tags, true);
+});
+</script>`;
   fs.writeFileSync(path.join(postDir, '미리보기.html'), out);
   return { cards, photos, todos };
 }
