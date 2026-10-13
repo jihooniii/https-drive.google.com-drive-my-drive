@@ -48,7 +48,8 @@ export function buildPreview(postDir) {
 
   const base = remoteBase(postDir, brand);
   let html = '', cp = '', i = 0, photos = 0, todos = 0, cards = 0;
-  const plain = t => inline(t).replace(/<mark class="todo">(.*?)<\/mark>/g, '<b style="background:#fff3c4">[$1]</b>');
+  // 복사본에는 안내 문구(직접 작성 표시)를 넣지 않음 → 그 자리는 빈 줄로
+  const plain = t => inline(t).replace(/<mark class="todo">(.*?)<\/mark>/g, '').trim() || '<br>';
   const img = src => {
     const p = path.join(postDir, src);
     return fs.existsSync(p) ? `data:image/png;base64,${fs.readFileSync(p).toString('base64')}` : '';
@@ -72,10 +73,10 @@ export function buildPreview(postDir) {
     }
     if (/^📷/.test(L.trim())) {
       photos++; html += `<div class="photo"><span>📷 현장 사진 자리</span>${inline(L.replace(/^📷\s*/, ''))}</div>`;
-      cp += `<p><b style="background:#fff3c4">[📷 현장 사진 넣을 자리: ${plain(L.replace(/^📷\s*/, ''))}]</b></p>`; i++; continue;
+      cp += '<p><br></p>'; i++; continue;   // 사진 자리는 빈 줄만 (안내 문구는 복사 안 됨)
     }
     if (/^\(공통 서명\)/.test(L.trim())) {
-      html += `<div class="sign"><b>${esc(brand.name)}</b><span>${esc(brand.contact)}</span><span>중개사무소 등록번호 · 주소는 공통 서명에서 자동으로 붙습니다</span></div>`;
+      html += `<div class="sign"><b>${esc(brand.name)}</b><span>${esc(brand.contact)}</span><span class="guide">중개사무소 등록번호 · 주소는 공통 서명에서 자동으로 붙습니다</span></div>`;
       cp += `<p><b>${esc(brand.name)}</b><br>${esc(brand.contact)}</p>`; i++; continue;
     }
     if (/^>/.test(L)) {                            // 인용 박스
@@ -148,6 +149,8 @@ td.n{text-align:right;font-variant-numeric:tabular-nums}
 .divider i{width:5px;height:5px;border-radius:50%;background:var(--ink3)}
 .photo{margin:24px 0;border:2px dashed #c9cdd3;border-radius:6px;padding:34px 18px;text-align:center;color:var(--ink2);font-family:var(--ui);font-size:14px;background:#fafbfc}
 .photo span{display:block;font-weight:800;color:var(--ink);font-size:15px;margin-bottom:4px}
+/* 안내용 표시는 드래그로 선택해도 복사되지 않게 */
+.photo,mark.todo,.guide{-webkit-user-select:none;user-select:none}
 mark.todo{background:var(--todo);color:var(--todo-ink);padding:2px 6px;border-radius:3px;font-family:var(--ui);font-size:14px;line-height:1.8}
 .note{white-space:normal;background:#eef5fd;border-radius:6px;padding:18px 20px;font-size:15px;line-height:1.85;margin:20px 0}
 code{font-family:var(--ui);background:#f0f1f3;padding:1px 5px;border-radius:3px;font-size:.9em}
@@ -181,7 +184,8 @@ code{font-family:var(--ui);background:#f0f1f3;padding:1px 5px;border-radius:3px;
   <ol>
     <li>네이버 글쓰기 화면에서 <b>제목</b>칸에 제목을 붙여넣기</li>
     <li><b>본문 복사</b>를 누르고 본문 첫 줄을 클릭한 뒤 붙여넣기 (Ctrl+V / ⌘+V). 카드 이미지 ${cards}장이 함께 들어갑니다</li>
-    <li>노란 표시(현장 사진 자리, 직접 작성)를 채우고 지우기 → 첫 카드를 대표 이미지로 지정</li>
+    <li>점선 박스(현장 사진)와 노란 표시(직접 작성)는 <b>복사되지 않고 빈 줄로</b> 들어갑니다. 아래 미리보기를 보면서 그 빈 줄에 사진을 넣고 글을 쓰세요</li>
+    <li>첫 카드(표지)를 대표 이미지로 지정</li>
   </ol>
 </section>
 <article>
